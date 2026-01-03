@@ -1,0 +1,29 @@
+# --- Python Basics ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.env
+
+# --- Project Data (Too large for Git) ---
+# Ignore the vector database (it's heavy binary data)
+db/
+
+# Ignore the raw PDFs (avoid copyright issues & repo bloat)
+data/pdfs/
+
+# Ignore downloaded AI models (if you downloaded them locally)
+models/
+
+# --- IDE Settings (Personal preferences) ---
+.vscode/
+.idea/
+*.DS_Store
+
+# --- Logs & Temp Files ---
+*.log
+.pytest_cache/
