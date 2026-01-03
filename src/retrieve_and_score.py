@@ -77,7 +77,7 @@ def main():
         
         # Combine Question + Options for a rich semantic query
         options_text = ""
-        # Loop through your specific option columns
+        # Loop through  specific option columns
         for opt_col in ['option (a)', 'option (b)', 'option (c)', 'option (d)']:
             # Check if column exists and value is not empty (NaN)
             if opt_col in row and pd.notna(row[opt_col]):
@@ -88,7 +88,7 @@ def main():
         print(f"Processing Q{q_id}...", end="\r")
         
         # A. RETRIEVE: Get Top 5 Candidates via Vector Search
-        # This is where your error happened before - vector_db is now guaranteed to exist
+     
         try:
             retrieved_docs = vector_db.similarity_search(full_query, k=5)
         except Exception as e:
@@ -116,9 +116,7 @@ def main():
             "Extracted_Text": best_doc.page_content
         })
 
-    # ---------------------------------------------------------
-    # 4. SAVE RESULTS
-    # ---------------------------------------------------------
+    
     results_df = pd.DataFrame(results)
     results_df.to_csv(OUTPUT_FILE, index=False)
     print(f"\n\n✅ Analysis Complete! Results saved to {OUTPUT_FILE}")
