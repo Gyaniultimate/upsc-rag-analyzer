@@ -1,104 +1,109 @@
 import pandas as pd
+import torch
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings # Updated import for recent versions
 from sentence_transformers import CrossEncoder
- # Ensure ingest.py is in the same directory or adjust the import accordingly
 
 # CONFIGURATION
 DB_DIR = "./db/chroma_db"
 QUESTIONS_FILE = "./data/questions.csv"
 OUTPUT_FILE = "upsc_vision_analysis.csv"
 
-# 1. RETRIEVAL MODEL (Same as ingest.py)
+# Model Config
 EMBED_MODEL_NAME = "BAAI/bge-m3" 
-
-# 2. RERANKING MODEL (The "Judge")
-# This model is specifically trained to say "How relevant is this text to this query?"
 RERANK_MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 def main():
-    # Load Resources
-    print("Loading Vector DB on GPU...")
-    # UPDATE THIS BLOCK
+    # ---------------------------------------------------------
+    # 1. SETUP RESOURCES (GPU & DB)
+    # ---------------------------------------------------------
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"Running on device: {device.upper()}")
+
+    print("Loading Vector DB...")
+    # Initialize Embedding Model (matches ingest.py)
     hf_embeddings = HuggingFaceEmbeddings(
         model_name=EMBED_MODEL_NAME,
-        model_kwargs={'device': 'cuda'} # <--- Add this here too
+        model_kwargs={'device': device}
     )
     
-    print("Loading Cross-Encoder on GPU...")
-    # CrossEncoder usually detects GPU automatically, but you can force it:
-    cross_encoder = CrossEncoder(RERANK_MODEL_NAME, device='cuda')
+    # Connect to the existing Database
+    vector_db = Chroma(
+        persist_directory=DB_DIR, 
+        embedding_function=hf_embeddings
+    )
+    
+    print(f"Loading Cross-Encoder on {device}...")
+    cross_encoder = CrossEncoder(RERANK_MODEL_NAME, device=device)
     
     # ---------------------------------------------------------
-    # 1. LOAD CSV & FIX HEADERS
+    # 2. LOAD CSV & PREPARE DATA
     # ---------------------------------------------------------
+    print(f"Loading questions from {QUESTIONS_FILE}...")
     try:
         df_q = pd.read_csv(QUESTIONS_FILE)
     except Exception as e:
         print(f"❌ Error reading CSV: {e}")
         return
 
-    # Clean invisible spaces (e.g. "id " -> "id")
+    # Clean header names (remove hidden spaces)
     df_q.columns = df_q.columns.str.strip()
     
-    # Map YOUR headers to the script's variables
-    # We rename them so the code below is standard
+    # Standardize column names based on your file structure
     header_map = {
-        'Question Text': 'question_text',  # Renaming your header
-        'id': 'id',                        # Keeping this as is
-        'ID': 'id'                         # Just in case it's capitalized
+        'Question Text': 'question_text',
+        'Question T': 'question_text', # Handle potential variations
+        'id': 'id',
+        'ID': 'id'
     }
     df_q.rename(columns=header_map, inplace=True)
     
-    # Validation check
+    # Verify we have the critical column
     if 'question_text' not in df_q.columns:
         print(f"❌ Error: Column 'Question Text' not found.")
-        print(f"   Detected columns: {list(df_q.columns)}")
+        print(f"   Found columns: {list(df_q.columns)}")
         return
 
-    print(f"Loaded {len(df_q)} questions.")
+    print(f"✅ Loaded {len(df_q)} questions.")
     
     results = []
     
     # ---------------------------------------------------------
-    # 2. PROCESS LOOP
+    # 3. ANALYSIS LOOP
     # ---------------------------------------------------------
     for index, row in df_q.iterrows():
         q_id = row.get('id', index+1) 
-        
-        # A. BUILD QUERY: Combine Question + Options
-        # This is CRITICAL for MCQs. The semantic answer is often in the options.
         q_text = row['question_text']
         
-        # Collect all options into a single string
-        # Using the exact headers you provided: "option a)", "option b)", etc.
+        # Combine Question + Options for a rich semantic query
         options_text = ""
+        # Loop through your specific option columns
         for opt_col in ['option (a)', 'option (b)', 'option (c)', 'option (d)']:
+            # Check if column exists and value is not empty (NaN)
             if opt_col in row and pd.notna(row[opt_col]):
                 options_text += f" {row[opt_col]}"
         
-        # The full search query
         full_query = f"{q_text} {options_text}".strip()
         
         print(f"Processing Q{q_id}...", end="\r")
-        vector_db = Chroma(
-        persist_directory=DB_DIR, 
-        embedding_function=hf_embeddings
-    )
-        # B. RETRIEVE (Vector Search)
-        # Get top 5 candidates
-        retrieved_docs = vector_db.similarity_search(full_query, k=5)
+        
+        # A. RETRIEVE: Get Top 5 Candidates via Vector Search
+        # This is where your error happened before - vector_db is now guaranteed to exist
+        try:
+            retrieved_docs = vector_db.similarity_search(full_query, k=5)
+        except Exception as e:
+            print(f"\n⚠️ Search failed for Q{q_id}: {e}")
+            continue
         
         if not retrieved_docs:
-            print(f"Warning: No docs found for Q{q_id}")
             continue
             
-        # C. RERANK (Cross-Encoder)
-        # We compare the FULL query against the retrieved chunks
+        # B. RERANK: Use Cross-Encoder to find the precise answer
         pairs = [[full_query, doc.page_content] for doc in retrieved_docs]
         scores = cross_encoder.predict(pairs)
         
-        # D. PICK WINNER
+        # C. SELECT BEST MATCH
+        # Zip docs and scores together, sort by score descending
         scored_docs = sorted(zip(retrieved_docs, scores), key=lambda x: x[1], reverse=True)
         best_doc, best_score = scored_docs[0]
         
@@ -111,7 +116,9 @@ def main():
             "Extracted_Text": best_doc.page_content
         })
 
-    # Save Results
+    # ---------------------------------------------------------
+    # 4. SAVE RESULTS
+    # ---------------------------------------------------------
     results_df = pd.DataFrame(results)
     results_df.to_csv(OUTPUT_FILE, index=False)
     print(f"\n\n✅ Analysis Complete! Results saved to {OUTPUT_FILE}")
