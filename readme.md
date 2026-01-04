@@ -119,8 +119,5 @@ Open `upsc_vision_analysis.csv`. Important columns:
 
 ---
 
-If you want, I can:
-- Convert this into the repository's `README.md` file (done), or
-- Add a short example `questions.csv` template and a minimal test PDF to quickly verify the pipeline.
-Which would you like?
+
 
